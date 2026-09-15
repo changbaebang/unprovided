@@ -1,0 +1,9 @@
+{
+  "externalContexts": [
+    {
+      "name": "QueryClient",
+      "providers": [{ "module": "@acme/query", "export": "QueryClientProvider" }],
+      "consumers": [{ "module": "@acme/query", "export": "useQuery" }]
+    }
+  ]
+}
