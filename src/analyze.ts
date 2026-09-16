@@ -6,7 +6,7 @@ import pkg from '../package.json';
 import { loadConfig, validateConfig } from './config.js';
 import { discoverEntries } from './entries.js';
 import { ConfigError } from './errors.js';
-import { type ContextFact, type UsageFact, extractFacts } from './facts.js';
+import { type ContextFact, extractFacts, type UsageFact } from './facts.js';
 import { toPosix } from './glob.js';
 import { createProjectProgram } from './program.js';
 import { Reachability } from './reach.js';

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ConfigError, analyze } from '../src/index.js';
+import { analyze, ConfigError } from '../src/index.js';
 import { findingsByPage, fixture } from './helpers.js';
 
 const isWindows = process.platform === 'win32';
