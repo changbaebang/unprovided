@@ -315,7 +315,7 @@ git tag vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-The `Release` GitHub Action builds, tests and publishes to npm with provenance using the `NPM_TOKEN` repository secret. **Publish only through this tag → GitHub Actions flow; never run `npm publish` locally.** `publishConfig.registry` is pinned to `https://registry.npmjs.org/` so a machine whose `.npmrc` points at a private registry cannot publish there by accident.
+The `Release` GitHub Action builds, tests and publishes to npm with provenance using the `NPM_TOKEN` repository secret. **Publish only through this tag → GitHub Actions flow; never run `npm publish` locally.** `publishConfig.registry` is pinned to `https://registry.npmjs.org/` so a machine whose `.npmrc` points at a private registry cannot publish there by accident. `v*` tags are protected by a repository ruleset: only the repository admin can create them, so a collaborator's write access cannot trigger a release.
 
 ## License
 
