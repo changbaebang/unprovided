@@ -315,7 +315,7 @@ git tag vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-`Release` GitHub Action 이 빌드 · 테스트 후 `NPM_TOKEN` 저장소 시크릿을 사용해 provenance 와 함께 npm 에 게시합니다. **게시는 오직 이 태그 → GitHub Actions 흐름으로만 합니다. 로컬에서 `npm publish` 를 실행하지 마세요.** `publishConfig.registry` 가 `https://registry.npmjs.org/` 로 고정되어 있어, `.npmrc` 가 사설 레지스트리를 가리키는 머신에서도 실수로 거기에 게시할 수 없습니다. `v*` 태그는 저장소 ruleset 으로 보호되어 저장소 admin 만 만들 수 있으므로, 협업자의 write 권한으로는 릴리스를 트리거할 수 없습니다.
+`Release` GitHub Action 이 빌드 · 테스트 후 npm **trusted publishing**(GitHub OIDC 신원, 토큰 저장 없음)으로 provenance 와 함께 npm 에 게시합니다. **게시는 오직 이 태그 → GitHub Actions 흐름으로만 합니다. 로컬에서 `npm publish` 를 실행하지 마세요.** `publishConfig.registry` 가 `https://registry.npmjs.org/` 로 고정되어 있어, `.npmrc` 가 사설 레지스트리를 가리키는 머신에서도 실수로 거기에 게시할 수 없습니다. `v*` 태그는 저장소 ruleset 으로 보호되어 저장소 admin 만 만들 수 있으므로, 협업자의 write 권한으로는 릴리스를 트리거할 수 없습니다.
 
 ## 라이선스
 
