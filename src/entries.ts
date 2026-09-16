@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { WALK_BOUNDARY_DIRS, expandGlobs, toPosix, walkFiles } from './glob.js';
+import { expandGlobs, toPosix, WALK_BOUNDARY_DIRS, walkFiles } from './glob.js';
 import type { EntryKind } from './types.js';
 
 const EXTS = ['tsx', 'jsx', 'ts', 'js'] as const;

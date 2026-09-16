@@ -4,9 +4,14 @@
   "description": "Find React hooks that read a Context whose Provider is never mounted on that page (static check for Next.js and React)",
   "license": "MIT",
   "author": "Changbae Bang",
-  "repository": { "type": "git", "url": "git+https://github.com/changbaebang/unprovided.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/changbaebang/unprovided.git"
+  },
   "homepage": "https://github.com/changbaebang/unprovided#readme",
-  "bugs": { "url": "https://github.com/changbaebang/unprovided/issues" },
+  "bugs": {
+    "url": "https://github.com/changbaebang/unprovided/issues"
+  },
   "keywords": [
     "react",
     "context",
@@ -21,19 +26,35 @@
   ],
   "type": "module",
   "packageManager": "pnpm@8.15.0",
-  "engines": { "node": ">=20" },
-  "bin": { "unprovided": "dist/cli.js" },
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "unprovided": "dist/cli.js"
+  },
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-      "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     },
     "./package.json": "./package.json"
   },
-  "files": ["dist", "README.md", "README.ko.md", "CHANGELOG.md", "LICENSE"],
+  "files": [
+    "dist",
+    "README.md",
+    "README.ko.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
   "sideEffects": false,
   "publishConfig": {
     "access": "public",
@@ -56,7 +77,7 @@
     "typescript": "^5.4.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "1.9.4",
+    "@biomejs/biome": "2.5.12",
     "@types/node": "^26.5.0",
     "tsup": "^8.3.5",
     "vitest": "^5.0.0"
