@@ -1,6 +1,6 @@
 {
   "name": "unprovided",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Find React hooks that read a Context whose Provider is never mounted on that page (static check for Next.js and React)",
   "license": "MIT",
   "author": "Changbae Bang",
