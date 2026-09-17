@@ -4,7 +4,7 @@ import { performance } from 'node:perf_hooks';
 import type ts from 'typescript';
 import pkg from '../package.json';
 import { loadConfig, validateConfig } from './config.js';
-import { discoverEntries } from './entries.js';
+import { discoverEntries, explainNoEntries } from './entries.js';
 import { ConfigError } from './errors.js';
 import { type ContextFact, extractFacts, type UsageFact } from './facts.js';
 import { toPosix } from './glob.js';
@@ -47,15 +47,16 @@ export async function analyze(options: AnalyzeOptions = {}): Promise<AnalysisRes
   else config = (await loadConfig(root, options.config)).config;
 
   const diagnostics: string[] = [];
+  const entryGlobs = [...(config.entries ?? []), ...(options.entries ?? [])];
+  const alwaysGlobs = [...(config.always ?? []), ...(options.always ?? [])];
   const entries = discoverEntries(root, {
-    entries: [...(config.entries ?? []), ...(options.entries ?? [])],
-    always: [...(config.always ?? []), ...(options.always ?? [])],
+    entries: entryGlobs,
+    always: alwaysGlobs,
     onEmptyGlob: (kind, pattern) => diagnostics.push(`--${kind} glob matched no file: ${pattern}`),
   });
   if (entries.length === 0) {
-    const msg =
-      'no entries found: expected app/**/page.*, src/app/**/page.*, pages/** or src/pages/** under root, or --entry globs';
-    if (!options.allowEmpty) throw new ConfigError(`${msg} (pass --allow-empty to exit 0)`);
+    const msg = explainNoEntries(root, { entries: entryGlobs, always: alwaysGlobs });
+    if (!options.allowEmpty) throw new ConfigError(msg);
     diagnostics.push(msg);
   }
 
@@ -65,13 +66,28 @@ export async function analyze(options: AnalyzeOptions = {}): Promise<AnalysisRes
   const defaulted = options.defaultedContexts ?? config.defaultedContexts ?? 'info';
   const project = createProjectProgram({ root, rootNames, tsconfig, boundary });
   if (!project.tsconfigPath)
-    diagnostics.push('no tsconfig.json found; using default compiler options');
+    diagnostics.push(
+      'no tsconfig.json or jsconfig.json found; using default compiler options (path aliases will not resolve)',
+    );
+  diagnostics.push(...project.diagnostics);
 
   const rel = (file: string): string => toPosix(path.relative(root, file));
   const loc = (node: ts.Node, sf: ts.SourceFile): Location => {
     const { line, character } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
     return { file: rel(sf.fileName), line: line + 1, col: character + 1 };
   };
+
+  const unresolved = project.unresolvedImports();
+  if (unresolved.length > 0) {
+    const examples = unresolved
+      .slice(0, 3)
+      .map((u) => `'${u.specifier}' from ${rel(u.from)}`)
+      .join(', ');
+    const more = unresolved.length > 3 ? `, +${unresolved.length - 3} more` : '';
+    diagnostics.push(
+      `unresolved imports: ${unresolved.length} relative or alias import${unresolved.length === 1 ? '' : 's'} resolved to no file, so anything behind ${unresolved.length === 1 ? 'it' : 'them'} is invisible (${examples}${more}); check tsconfig paths/baseUrl or pass --tsconfig`,
+    );
+  }
 
   const facts = extractFacts(project, config.externalContexts ?? []);
   const ignore = new Set(config.ignore ?? []);
@@ -111,7 +127,7 @@ export async function analyze(options: AnalyzeOptions = {}): Promise<AnalysisRes
     for (const [key, consumers] of consumersByCtx) {
       const ctx = facts.contexts.get(key);
       if (!ctx || ignore.has(ctx.name)) continue;
-      const reachable = consumers.filter((c) => reach.isReachable(c.node, closure));
+      const reachable = consumers.filter((c) => reach.isReachable(c.anchor ?? c.node, closure));
       if (reachable.length === 0) continue;
       const provided = (providersByCtx.get(key) ?? []).some((p) =>
         reach.isReachable(p.node, closure),

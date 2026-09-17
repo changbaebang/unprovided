@@ -16,9 +16,11 @@ export class Reachability {
   constructor(private readonly project: ProjectProgram) {}
 
   /**
-   * Declarations that form the entry of `file`: its default export, or the whole file as
-   * fallback. The whole-file fallback exists for entry / `--always` files only (a `_app.tsx`
-   * without a default export, a shell module); `import()` targets never use it.
+   * Declarations that form the entry of `file`: its default export plus any module-level
+   * `<DefaultExport>.getLayout = …` assignment (the Next.js Pages Router per-page layout
+   * pattern, whose Providers are mounted by that function rather than by `_app`), or the whole
+   * file as fallback. The whole-file fallback exists for entry / `--always` files only (a
+   * `_app.tsx` without a default export, a shell module); `import()` targets never use it.
    */
   rootsOf(file: string): ts.Node[] {
     const cached = this.roots.get(file);
@@ -27,8 +29,32 @@ export class Reachability {
     if (out.length === 0) {
       const sf = this.project.program.getSourceFile(file);
       out = sf ? [sf] : [];
+    } else {
+      out = [...out, ...this.getLayoutAssignments(file, out)];
     }
     this.roots.set(file, out);
+    return out;
+  }
+
+  /**
+   * `Page.getLayout = (page) => <Layout>{page}</Layout>` statements at the top level of `file`
+   * whose target is one of `defaultDecls`.
+   */
+  private getLayoutAssignments(file: string, defaultDecls: readonly ts.Node[]): ts.Node[] {
+    const { program, checker } = this.project;
+    const sf = program.getSourceFile(file);
+    if (!sf) return [];
+    const out: ts.Node[] = [];
+    for (const st of sf.statements) {
+      if (!ts.isExpressionStatement(st) || !ts.isBinaryExpression(st.expression)) continue;
+      const { left, operatorToken } = st.expression;
+      if (operatorToken.kind !== ts.SyntaxKind.EqualsToken) continue;
+      if (!ts.isPropertyAccessExpression(left) || left.name.text !== 'getLayout') continue;
+      if (!ts.isIdentifier(left.expression)) continue;
+      const sym = checker.getSymbolAtLocation(left.expression);
+      if (!sym) continue;
+      if (this.declsOf(sym).some((d) => defaultDecls.includes(d))) out.push(st);
+    }
     return out;
   }
 
