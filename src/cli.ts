@@ -2,6 +2,7 @@ import { parseArgs } from 'node:util';
 import pkg from '../package.json';
 import { analyze } from './analyze.js';
 import { DEFAULTED_LEVELS, isDefaultedLevel } from './config.js';
+import { formatEnvironment, inspectEnvironment } from './env.js';
 import { ConfigError } from './errors.js';
 import { formatHuman } from './format.js';
 
@@ -20,12 +21,15 @@ Options:
   --defaulted <level> Severity for contexts with a non-nullish createContext default: info (default), warning, error or ignore.
   --fail-on <level>   Exit 1 on "error" (default) or "warning". "info" findings never fail.
   --allow-empty       Exit 0 instead of 2 when no entry is found.
+  --env               Print the environment (root, boundary, tsconfig, routers, entries, versions) and exit; for bug reports.
   --json              Print the machine-readable result instead of the human report.
   --no-color          Disable colors.
   -h, --help          Show this help.
   -v, --version       Print the version.
 
-Exit codes: 0 clean, 1 findings at or above --fail-on, 2 usage/config error or no entries found.`;
+Exit codes: 0 clean, 1 findings at or above --fail-on, 2 usage/config error or no entries found.
+Non-fatal problems (tsconfig options ignored, unresolved alias imports, empty globs) are printed as
+"note ..." lines and returned in "diagnostics" with --json; they never change the exit code.`;
 
 export async function main(argv: readonly string[]): Promise<number> {
   let parsed: ReturnType<typeof parseArgs<typeof spec>>;
@@ -40,6 +44,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       defaulted: { type: 'string' },
       'fail-on': { type: 'string' },
       'allow-empty': { type: 'boolean' },
+      env: { type: 'boolean' },
       json: { type: 'boolean' },
       'no-color': { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },
@@ -76,16 +81,26 @@ export async function main(argv: readonly string[]): Promise<number> {
     return 2;
   }
 
+  const common = {
+    ...(v.root !== undefined ? { root: v.root } : {}),
+    ...(v.entry !== undefined ? { entries: v.entry } : {}),
+    ...(v.always !== undefined ? { always: v.always } : {}),
+    ...(v.tsconfig !== undefined ? { tsconfig: v.tsconfig } : {}),
+    ...(v.config !== undefined ? { config: v.config } : {}),
+    ...(v.boundary !== undefined ? { boundary: v.boundary } : {}),
+    ...(v['allow-empty'] ? { allowEmpty: true } : {}),
+  };
   try {
+    if (v.env) {
+      const report = await inspectEnvironment(common);
+      process.stdout.write(
+        v.json ? `${JSON.stringify(report, null, 2)}\n` : `${formatEnvironment(report)}\n`,
+      );
+      return report.error ? 2 : 0;
+    }
     const result = await analyze({
-      ...(v.root !== undefined ? { root: v.root } : {}),
-      ...(v.entry !== undefined ? { entries: v.entry } : {}),
-      ...(v.always !== undefined ? { always: v.always } : {}),
-      ...(v.tsconfig !== undefined ? { tsconfig: v.tsconfig } : {}),
-      ...(v.config !== undefined ? { config: v.config } : {}),
-      ...(v.boundary !== undefined ? { boundary: v.boundary } : {}),
+      ...common,
       ...(defaulted !== undefined ? { defaultedContexts: defaulted } : {}),
-      ...(v['allow-empty'] ? { allowEmpty: true } : {}),
     });
     if (v.json) {
       process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

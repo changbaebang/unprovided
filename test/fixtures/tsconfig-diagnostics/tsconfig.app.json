@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "jsx": "preserve",
+    "paths": { "@/*": ["./src/*"] },
+    "optionFromANewerTypeScript": true,
+    "strict": "yes"
+  },
+  "include": ["src", "app"]
+}

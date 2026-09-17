@@ -78,7 +78,132 @@ npx unprovided --root apps/web --boundary .     # 앱에서 멈춤: 워크스페
 
 입력 집합이 비어 있으면(페이지 0개, 아무것도 매칭하지 않는 `--entry` glob) exit 2 로 끝나서, 잘못 적은 `--root` 가 CI 를 조용히 통과할 수 없습니다. `--allow-empty` 를 주면 다시 exit 0 입니다.
 
-Node.js 20 이상이 필요합니다. `typescript` 는 일반 의존성이라 따로 설치할 것이 없습니다.
+Node.js 20 이상이 필요합니다. `typescript` 는 일반 의존성이라 따로 설치할 것이 없습니다. 지원 여부는 [요구 사항 & 호환성](#요구-사항--호환성) 을, 프로젝트에서 도구가 보는 것은 `npx unprovided --env` 로 확인하세요.
+
+## 요구 사항 & 호환성
+
+CI 에 넣기 전에 읽어 보세요. 각 행에는 검증 방법을 적었습니다: **fixture**(`test/fixtures` 아래의 테스트), **code**(소스를 읽어 확인, 전용 테스트 없음), **untested**(미검증).
+
+**런타임**
+
+| 항목 | 상태 | 근거 |
+| --- | --- | --- |
+| Node.js 20, 22, 24 | 지원. CI 에서 각 버전으로 전체 테스트 실행 | CI matrix |
+| Windows | **미검증** — 경로 처리는 `/` 와 `\` 를 모두 고려해 작성했지만, 심볼릭 링크 테스트는 `win32` 에서 건너뜁니다 | untested |
+| 프로젝트의 TypeScript | 무관: 도구는 자체 `typescript`(^5.4) 의존성을 씁니다. 프로젝트가 TS 4.x 든 더 새로운 메이저든 상관없고, `tsconfig.json` 만 읽습니다 | code |
+| 프로젝트 규모 | 하드 리밋 없음. 참고치: 소스 약 6,000 파일 / 52 페이지 / 60 컨텍스트가 Apple Silicon 노트북에서 약 6 초, RSS 약 1 GB. 시간과 메모리는 엔트리에서 도달 가능한 파일 수에 비례합니다 | measured |
+
+**Next.js App Router (13.4+ 규약)**
+
+| 파일 / 규약 | 처리 | 근거 |
+| --- | --- | --- |
+| `app/`, `src/app/` | 둘 다 `--root` 아래에서 탐색 | fixture |
+| `page.{tsx,jsx,ts,js}` | 엔트리. 체인 = `app/` 부터 해당 디렉터리까지의 모든 `layout.*` 과 `template.*` | fixture |
+| `loading.*`, `error.*`, `not-found.*` | **그 디렉터리의 page 와 같은 체인**을 갖는 엔트리(같은 레이아웃 안에서 렌더되므로) | fixture |
+| `default.*`(병렬 라우트 폴백) | 슬롯의 체인을 갖는 엔트리 | fixture |
+| `global-error.*` | **빈 체인**을 갖는 엔트리(루트 레이아웃을 대체하므로 위에 아무것도 마운트되지 않음) | fixture |
+| `layout.*`, `template.*` | 체인 구성원. 엔트리가 아님 | fixture |
+| 라우트 그룹 `(group)` | 일반 디렉터리. 그 안의 `layout.*` 은 아래 모든 것의 체인에 들어감 | fixture |
+| 병렬 라우트 `@slot` | 일반 디렉터리. `app/@modal/page.tsx` 는 체인이 `app/layout.*` + `app/@modal/layout.*` 인 엔트리 | fixture |
+| 인터셉팅 라우트 `(.)`, `(..)`, `(...)` | 라우트 그룹과 같은 일반 디렉터리. 인터셉팅 페이지는 슬롯의 체인을 유지 | fixture |
+| `route.*` 핸들러, `middleware.*`, `instrumentation.*`, `metadata` / `generateMetadata`, `opengraph-image.*` 등 | 무시(렌더링이 아님) | fixture (`route.ts`) / code |
+| `'use client'` | **구분하지 않음.** Provider 는 서버 컴포넌트든 클라이언트 컴포넌트든 Provider 이고, 서버 레이아웃에서 마운트한 클라이언트 래퍼도 따라갑니다. 서버 컴포넌트 안의 `useContext` 는 별개의 React 오류라 이 도구는 보고하지 않습니다 | fixture |
+
+**Next.js Pages Router**
+
+| 파일 / 규약 | 처리 | 근거 |
+| --- | --- | --- |
+| `pages/`, `src/pages/` | 둘 다 탐색. 모든 `.tsx/.jsx/.ts/.js` 파일이 엔트리 | fixture |
+| `_app.*` | 모든 페이지의 체인 | fixture |
+| `_document.*`, `_error.*`, `api/**`, `middleware.*` | 엔트리 아님(`404.*` / `500.*` 은 페이지) | fixture / code |
+| `Page.getLayout = (page) => <Layout>{page}</Layout>` | **따라감**: default export 에 대한 모듈 최상위 `getLayout` 대입은 페이지 루트의 일부라, 거기서 마운트한 Provider 도 인정합니다. 대입 뒤에 `export default Page` 하는 형태도 동작 | fixture |
+| 그 밖의 페이지별 레이아웃 방식(다른 이름의 static 프로퍼티, HOC) | HOC: 일반 호출처럼 따라감. 다른 프로퍼티 이름: 따라가지 않음 | code |
+
+**React**
+
+| 문법 | 처리 | 근거 |
+| --- | --- | --- |
+| `createContext(...)`, `React.createContext(...)` | 컨텍스트. 기본값은 `undefined` / `null` / `other` 로 분류 | fixture |
+| `useContext(C)`, `React.useContext(C)`, `use(C)`(React 19) | 소비자 | fixture |
+| `<C.Consumer>` 렌더 프롭, `createElement(C.Consumer)` | 소비자(`silent`) | fixture |
+| `static contextType = C`, `Class.contextType = C` | 소비자(`silent`, 클래스 이름으로 보고) | fixture |
+| `<C.Provider>`, `<C value>`(React 19), `const P = C.Provider`, `createElement`/`jsx(C.Provider)` | 제공자 | fixture |
+| `const { Provider } = C`, `createContext` 래퍼/팩토리 | **감지 안 됨**("알려진 거짓 음성" 참고) | code |
+
+**Next.js 가 아닌 프로젝트** — 엔트리를 직접 넘기고, `--always` 로 항상 마운트되는 셸을 지정합니다.
+
+| 구성 | 명령 | 근거 |
+| --- | --- | --- |
+| Vite / CRA | `unprovided --entry 'src/main.tsx' --always 'src/App.tsx'` | fixture (`plain-react`) |
+| Remix / React Router 프레임워크 모드 | `unprovided --entry 'app/routes/**/*.tsx' --always 'app/root.tsx'` | fixture (`remix-style`) |
+| Expo Router | `unprovided --entry 'app/**/*.tsx' --always 'app/_layout.tsx'`(그 `app/` 에는 `page.*` 가 없어 자동 탐색되지 않음) | untested |
+| 루트 아래에 이름이 정확히 `app/` 이나 `pages/` 인 디렉터리 | 엔트리 모양의 파일이 있으면 Next.js 로 취급. `src/pages/*.tsx` 를 가진 Vite 프로젝트는 그 안의 모든 파일이 `_app` 체인 없는 Pages Router 엔트리가 됩니다 — 더 좁은 트리에 `--root`/`--entry` 를 쓰거나 `ignore` 를 사용하세요 | code |
+
+**모듈 해석 & TypeScript 설정**
+
+| 기능 | 처리 | 근거 |
+| --- | --- | --- |
+| `tsconfig.json` 탐색 | 명시한 `--tsconfig`, 없으면 루트에서 위로 올라가며 가장 가까운 `tsconfig.json`, 그것도 없으면 가장 가까운 `jsconfig.json`(루트 옆의 `jsconfig.json` 이 상위의 `tsconfig.json` 보다 우선) | fixture |
+| `paths`, `baseUrl`, `extends` 체인(파일과 패키지) | TypeScript 자체 설정 파서를 통해 반영 | fixture / code |
+| 프로젝트 레퍼런스(`references` + `files: []`, Vite 템플릿) | **따라가지 않음.** 참조된 설정은 읽지 않습니다. 루트 설정에 `paths`/`baseUrl` 이 없으면 `note tsconfig: … only references other configs` 를 출력 — `--tsconfig tsconfig.app.json` 을 넘기세요 | fixture |
+| 번들된 TypeScript 가 모르는 옵션(더 새 릴리스용), 잘못된 값, 없는 `extends` 대상 | `note tsconfig: … (TSxxxx, ignored)` 로 보고하고 건너뜀. 실행은 계속 | fixture |
+| 파싱할 수 없는 tsconfig(JSON 문법 오류) | exit 2: `tsconfig: cannot parse <file>: <TypeScript 메시지>` | fixture |
+| `moduleResolution` `bundler` / `node16` / `nodenext` / `node10`, `.ts` 를 가리키는 ESM `.js` 지정자 | 반영(기본 `bundler`, `module` 이 CommonJS 면 `node10`) | fixture (`node16`) / code |
+| JavaScript 프로젝트(`allowJs`), `.js` / `.jsx` / `.mjs` 소스 | 항상 파싱(`allowJs` 강제 켬). `jsconfig.json` 의 `paths` 를 읽음 | fixture |
+| Barrel, `export *`, `next/dynamic`, `React.lazy`, `import()` | 따라감(`import()` 가 무엇을 기여하는지는 "동작 원리" 참고) | fixture |
+| 해석되지 않는 상대/별칭 import(`./x`, `@/x`, `~/x`, `#x`) | 개수를 세어 `note unresolved imports: N …` 으로 예시와 함께 출력. bare 패키지 이름은 외부로 기대하므로 세지 않음 | fixture |
+| `node_modules` 에 심볼릭 링크된 워크스페이스 패키지(pnpm / npm / yarn workspaces, lerna) | 경계 안이면 실제 경로까지 따라감(기본 경계: `--root` 위의 가장 가까운 워크스페이스 루트) | fixture |
+| 실제 `node_modules` 패키지 | 절대 분석하지 않음. Provider/소비자 쌍을 `externalContexts` 에 선언 | fixture |
+| 모노레포 루트를 `--root` 로 넘김 | 발견한 하위 앱 목록과 함께 exit 2(`Next.js apps found below root: apps/admin, apps/web — run once per app`) — 앱마다 한 번씩 실행하세요 | fixture |
+
+### 감지되는 것 / 안 되는 것
+
+감지: 위 React 표의 모든 조합을, 페이지 또는 그 체인에서 모듈 해석 표의 어떤 import 형태로든 도달한 경우. 미감지: 아래 "알려진 거짓 음성" 목록과, 해석되지 않는 import 뒤에 있는 모든 것 — 그래서 해석되지 않는 import 를 보고합니다.
+
+### 실패하는 방식
+
+거짓 "clean" 실행을 숨길 수 있는 것은 아무것도 조용히 지나가지 않습니다. exit 2 조건과 stderr 메시지 접두어:
+
+| 조건 | 메시지(stderr) |
+| --- | --- |
+| 엔트리 없음(`app/`/`pages/` 엔트리 없음, `--entry` glob 이 아무것도 매칭 안 함) | `unprovided: no entries found under <root>` 뒤에 `looked for: …`, 대신 존재하는 것, 하위 앱이 있으면 `Next.js apps found below root: …`, `--entry`/`--always` 레시피, `(pass --allow-empty to exit 0 instead)` |
+| `--root` 가 디렉터리가 아님 | `unprovided: root is not a directory: <path>` |
+| `--tsconfig` / `--config` 경로 없음 | `unprovided: tsconfig not found: <path>` / `unprovided: config file not found: <path>` |
+| tsconfig 를 파싱할 수 없음 | `unprovided: tsconfig: cannot parse <path>: <TypeScript 메시지>` |
+| 설정 파일 형태 오류 | `unprovided: <file>: "<key>" must be …` |
+| 경계가 루트를 포함하지 않음 | `unprovided: boundary must contain root: boundary=…, root=…` |
+| 알 수 없는 플래그 / 위치 인자 / 잘못된 `--fail-on` · `--defaulted` 값 | `unprovided: <파싱 오류>` 뒤에 도움말 |
+
+경고는 종료 코드를 바꾸지 않습니다. 사람용 리포트 상단에 `note <text>` 줄로 출력되고 `--json` 에서는 `diagnostics` 로 반환됩니다:
+
+| 조건 | note 접두어 |
+| --- | --- |
+| tsconfig / jsconfig 없음 | `no tsconfig.json or jsconfig.json found; using default compiler options` |
+| tsconfig 옵션이 알 수 없음 / 잘못됨 / `extends` 대상 없음 | `tsconfig: <TypeScript 메시지> (TSxxxx, ignored; from <file>)` |
+| 루트 tsconfig 에 `references` 만 있고 `paths`/`baseUrl` 없음 | `tsconfig: <file> only references other configs (…) and defines no paths/baseUrl` |
+| 해석되지 않는 상대/별칭 import | `unresolved imports: N relative or alias import(s) resolved to no file …` |
+| `--entry` / `--always` glob 이 아무것도 매칭 안 함 | `--entry glob matched no file: <glob>` / `--always glob matched no file: <glob>` |
+| 엔트리 없음 + `--allow-empty` | 같은 여러 줄 `no entries found under …` 텍스트를 note 로 |
+
+### `--env`: 도구가 보는 것
+
+버그 리포트용, 또는 CI 에 연결하기 전 설정 점검용입니다. 엔트리 탐색과 설정 로드만 하고 분석은 하지 않으며, 실제 실행과 같은 엔트리 없음 조건에서 exit 2(그 외 0):
+
+```
+$ npx unprovided --root apps/web --env
+unprovided 0.1.0
+node:        v22.12.0 (darwin-arm64)
+typescript:  5.9.3 (bundled dependency; your project's TypeScript is not used)
+root:        /home/me/acme/apps/web
+boundary:    /home/me/acme
+config:      /home/me/acme/apps/web/unprovided.config.json
+tsconfig:    /home/me/acme/apps/web/tsconfig.json
+routers:     app router: app; pages router: none
+entries:     45 (app: 45, pages: 0, custom: 0)
+always:      (none)
+```
+
+`--env --json` 은 같은 내용을 객체(`EnvironmentReport`. API 의 `inspectEnvironment()` 로도 사용 가능)로 출력합니다. 엔트리가 없으면 `nested apps:` 와 전체 `error:` 설명이 추가됩니다.
 
 ## CLI 옵션
 
@@ -89,12 +214,13 @@ Node.js 20 이상이 필요합니다. `typescript` 는 일반 의존성이라 �
 | `--root <dir>` | 프로젝트 루트(기본: 현재 디렉터리). 여기서 `app/`, `src/app/`, `pages/`, `src/pages/` 를 찾습니다. |
 | `--entry <glob>` | 추가 엔트리 파일(반복 가능). 루트 기준 상대 경로. 아무것도 매칭하지 않는 glob 은 `note` 로 보고됩니다. |
 | `--always <glob>` | 모든 엔트리에 항상 마운트된 것으로 간주할 파일(반복 가능). 루트 기준 상대 경로. |
-| `--tsconfig <path>` | `paths` / `baseUrl` 에 쓸 `tsconfig.json`. 루트 기준 상대 경로(기본: 루트에서 위로 올라가며 가장 가까운 것). |
+| `--tsconfig <path>` | `paths` / `baseUrl` 에 쓸 `tsconfig.json`. 루트 기준 상대 경로(기본: 루트에서 위로 올라가며 가장 가까운 `tsconfig.json`, 없으면 가장 가까운 `jsconfig.json`). |
 | `--config <path>` | 설정 파일. 루트 기준 상대 경로(기본: 루트의 `unprovided.config.{json,mjs,js}`). |
 | `--boundary <dir>` | 모듈 해석을 가두는 디렉터리. 밖의 파일은 외부로 취급합니다. 루트 기준 상대 경로(기본: 루트 또는 그 위의 가장 가까운 워크스페이스 루트 — `pnpm-workspace.yaml`, `package.json` `workspaces`, `lerna.json`, `.git` — 없으면 루트 자신). |
 | `--defaulted <level>` | nullish 가 아닌 기본값으로 만든 컨텍스트(`createContext('en')`)의 심각도: `info`(기본), `warning`, `error`, `ignore`. |
 | `--fail-on <level>` | `error`(기본) 또는 `warning` 까지 exit 1. `info` 결과는 절대 실패시키지 않습니다. |
 | `--allow-empty` | 엔트리를 하나도 찾지 못했을 때 exit 2 대신 exit 0. |
+| `--env` | 환경(버전, 루트, 경계, 설정, tsconfig, 라우터, 엔트리 수, always 파일, note)을 출력하고 exit 0, 엔트리가 없으면 exit 2. `--json` 과 조합 가능. |
 | `--json` | 기계가 읽는 결과 출력. |
 | `--no-color` | 색상 비활성화(`NO_COLOR` 도 존중). |
 | `-h, --help` / `-v, --version` | 도움말 / 버전. |
@@ -219,7 +345,7 @@ app/i18n/page.tsx
 | --- | --- |
 | `0` | `--fail-on` 이상의 결과 없음(기본적으로 warning 만으로는 실패하지 않음. `info` 는 절대 실패시키지 않음). |
 | `1` | `--fail-on` 이상의 결과 있음. |
-| `2` | 사용법 또는 설정 오류(알 수 없는 플래그, 위치 인자, 루트/tsconfig/설정 파일 없음, 설정 형태 오류, 루트를 포함하지 않는 boundary), 또는 **엔트리를 하나도 찾지 못함**(페이지 0개이고 `--entry` 매칭도 없음). `--allow-empty` 를 주면 후자는 exit 0. |
+| `2` | 사용법 또는 설정 오류(알 수 없는 플래그, 위치 인자, 루트/tsconfig/설정 파일 없음, 파싱할 수 없는 tsconfig, 설정 형태 오류, 루트를 포함하지 않는 boundary), 또는 **엔트리를 하나도 찾지 못함**(페이지 0개이고 `--entry` 매칭도 없음). `--allow-empty` 를 주면 후자는 exit 0. 모든 메시지는 [실패하는 방식](#실패하는-방식) 에 있습니다. |
 
 ## 프로그래밍 API
 
@@ -241,15 +367,15 @@ console.log(formatHuman(result, { color: false }));
 process.exitCode = result.summary.errors > 0 ? 1 : 0;
 ```
 
-`analyze` 는 CLI 가 exit 2 로 끝나는 상황과 같은 경우에 `ConfigError` 로 reject 합니다(`allowEmpty` 가 아니면 빈 입력 집합 포함). `loadConfig(root, path?)` 와 `validateConfig(raw)` 도 export 됩니다. CLI 는 이 API 의 얇은 래퍼입니다. ESM 과 CommonJS 빌드를 모두 제공하며 각각 자체 타입 선언을 갖습니다(`import` 는 `dist/index.d.ts`, `require` 는 `dist/index.d.cts`). 따라서 `module: node16` / `nodenext` 의 TypeScript 소비자는 어느 쪽으로도 타입 검사가 통과합니다.
+`analyze` 는 CLI 가 exit 2 로 끝나는 상황과 같은 경우에 `ConfigError` 로 reject 합니다(`allowEmpty` 가 아니면 빈 입력 집합 포함). `loadConfig(root, path?)`, `validateConfig(raw)`, 그리고 `--env` 가 출력하는 `inspectEnvironment(options)` / `formatEnvironment(report)` 도 export 됩니다. CLI 는 이 API 의 얇은 래퍼입니다. ESM 과 CommonJS 빌드를 모두 제공하며 각각 자체 타입 선언을 갖습니다(`import` 는 `dist/index.d.ts`, `require` 는 `dist/index.d.cts`). 따라서 `module: node16` / `nodenext` 의 TypeScript 소비자는 어느 쪽으로도 타입 검사가 통과합니다.
 
 ## 동작 원리
 
-1. **엔트리.** App Router: 모든 `app/**/page.{tsx,jsx,ts,js}` 와 `src/app/**/page.*`. 항상 마운트되는 체인은 `app` 루트까지의 조상 디렉터리에 있는 모든 `layout.*` 과 `template.*` 입니다(라우트 그룹 `(name)`, 병렬 `@slot`, 인터셉팅 세그먼트는 일반 디렉터리로 취급). Pages Router: `pages/**/*.{tsx,jsx,ts,js}` 와 `src/pages/**` 에서 `_app`, `_document`, `_error`, `api/**` 를 제외. 체인 = `pages/_app.*`. 라우트 트리는 `node_modules`, `.git`, `.next` 만 건너뛰고 순회하므로 `build`, `dist`, `out`, `coverage` 라는 이름의 라우트 세그먼트도 다른 페이지와 똑같이 페이지입니다(그 이름들은 `--entry` / `--always` glob 을 펼칠 때만 건너뜁니다). 두 규약 중 하나를 따르는 `--entry` 파일은 같은 방식으로 분류되고, 그 외는 `--always` 를 체인으로 갖는 `custom` 입니다.
-2. **Program.** 엔트리와 체인에서 출발해 TypeScript `Program` 하나를 만듭니다. import 는 가장 가까운(또는 `--tsconfig`) `tsconfig.json` 을 써서 `ts.resolveModuleName` 으로 해석하므로 `paths` / `baseUrl` 이 동작합니다. 해석은 **경계(boundary)** 에서 멈춥니다: 실제 경로가 경계 밖이거나 실제 `node_modules` 디렉터리 아래에 있는 모듈은 버립니다. 경계는 `--root` 또는 그 위의 가장 가까운 워크스페이스 루트(`pnpm-workspace.yaml`, `package.json` `workspaces`, `lerna.json`, `.git`)가 기본이라, 앱의 `node_modules` 에 심볼릭 링크된 워크스페이스 패키지는 워크스페이스 안의 실제 경로로 해석되어 분석됩니다. `--boundary` 로 바꿀 수 있습니다. `@types/*` 와 type reference directive 는 절대 로드하지 않습니다.
+1. **엔트리.** App Router: `app/` 또는 `src/app/` 아래의 모든 `page`, `loading`, `error`, `not-found`, `default` 파일(`.tsx/.jsx/.ts/.js`). 항상 마운트되는 체인은 `app` 루트까지의 조상 디렉터리에 있는 모든 `layout.*` 과 `template.*` 입니다(라우트 그룹 `(name)`, 병렬 `@slot`, 인터셉팅 `(.)`/`(..)`/`(...)` 세그먼트는 일반 디렉터리로 취급). `global-error.*` 는 빈 체인을 갖는 엔트리입니다. Pages Router: `pages/**/*.{tsx,jsx,ts,js}` 와 `src/pages/**` 에서 `_app`, `_document`, `_error`, `api/**` 를 제외. 체인 = `pages/_app.*`. 라우트 트리는 `node_modules`, `.git`, `.next` 만 건너뛰고 순회하므로 `build`, `dist`, `out`, `coverage` 라는 이름의 라우트 세그먼트도 다른 페이지와 똑같이 페이지입니다(그 이름들은 `--entry` / `--always` glob 을 펼칠 때만 건너뜁니다). 두 규약 중 하나를 따르는 `--entry` 파일은 같은 방식으로 분류되고, 그 외는 `--always` 를 체인으로 갖는 `custom` 입니다. 페이지의 루트는 default export 와, 그것에 대한 모듈 최상위 `Page.getLayout = …` 대입입니다.
+2. **Program.** 엔트리와 체인에서 출발해 TypeScript `Program` 하나를 만듭니다. import 는 가장 가까운(또는 `--tsconfig`) `tsconfig.json` — 없으면 `jsconfig.json` — 을 써서 `ts.resolveModuleName` 으로 해석하므로 `paths` / `baseUrl` 이 동작합니다. 그 파일의 문제는 `note tsconfig: …` 로 보고하고 건너뜁니다(파싱할 수 없는 파일은 exit 2). 아무것도 해석되지 않는 상대/별칭 import 는 개수를 세어 `note unresolved imports: …` 로 보고합니다. 해석은 **경계(boundary)** 에서 멈춥니다: 실제 경로가 경계 밖이거나 실제 `node_modules` 디렉터리 아래에 있는 모듈은 버립니다. 경계는 `--root` 또는 그 위의 가장 가까운 워크스페이스 루트(`pnpm-workspace.yaml`, `package.json` `workspaces`, `lerna.json`, `.git`)가 기본이라, 앱의 `node_modules` 에 심볼릭 링크된 워크스페이스 패키지는 워크스페이스 안의 실제 경로로 해석되어 분석됩니다. `--boundary` 로 바꿀 수 있습니다. `@types/*` 와 type reference directive 는 절대 로드하지 않습니다.
 3. **사실 추출** — 모든 프로젝트 파일에서:
    - 컨텍스트: `createContext(...)` / `React.createContext(...)` 로 초기화된 변수. 기본값은 `undefined`, `null`, `other` 로 분류;
-   - 소비자: `useContext(C)`, `React.useContext(C)`, `use(C)`, `<C.Consumer>`, `createElement(C.Consumer)`. 감싸는 함수가 값을 throw 로 가드하면(`if (!x) throw`, `if (x === undefined) throw`, `if (x == null) throw`, `typeof x === 'undefined'`, `invariant(x)` / `assert*(x)`, `x ?? invariant(...)`, `x ?? (() => { throw })()`) `throws`, 아니면 `silent`;
+   - 소비자: `useContext(C)`, `React.useContext(C)`, `use(C)`, `<C.Consumer>`, `createElement(C.Consumer)`, 그리고 `static contextType = C` / `Class.contextType = C` 를 쓰는 클래스 컴포넌트(항상 `silent`, 클래스 이름으로 보고). 감싸는 함수가 값을 throw 로 가드하면(`if (!x) throw`, `if (x === undefined) throw`, `if (x == null) throw`, `typeof x === 'undefined'`, `invariant(x)` / `assert*(x)`, `x ?? invariant(...)`, `x ?? (() => { throw })()`) `throws`, 아니면 `silent`;
    - 제공자: JSX `<C.Provider>`, `<C>`(React 19), `const P = C.Provider` 같은 변수 별칭, `createElement(C.Provider, …)` / `jsx(C.Provider, …)`.
 4. **도달성** 은 심볼 단위입니다. 파일의 default export 에서 출발해 도달 가능한 각 선언의 본문을 순회하고, 모든 식별자를 checker 로 해석(import 별칭과 재수출 해소)해 얻은 선언(함수, 변수, 클래스, 객체 프로퍼티, `export default` 식)을 클로저에 추가합니다. `import('./x')` 호출 지점은 실제로 쓰는 것만 기여합니다: `import('./x').then(m => m.A)` 와 `.then(({ A }) => …)` 는 export `A` 만 추가하고(`m.default` 는 default export), `dynamic(() => import('./x'))`, `lazy(() => import('./x'))` 와 그 밖의 bare `import('./x')` 는 default export 가 있으면 그것을, 없으면 `x` 의 **모든 export** 를 추가합니다. `.then` 콜백이 모듈 객체를 밖으로 흘리는 경우(`.then(m => helper(m))`, `.then(m => m)`)에도 같은 "모든 export" 폴백이 적용됩니다. `x` 의 export 되지 않은 선언은 `import()` 를 통해서는 절대 들어오지 않습니다. default export 가 없는 엔트리 / `--always` 파일만 파일 전체를 루트로 씁니다.
 5. **판정** — (페이지, 컨텍스트)마다: 페이지 ∪ 체인에서 도달 가능한 소비자가 있고 같은 클로저에서 도달 가능한 제공자가 없으면 → 결과. 도달 가능한 소비자 중 하나라도 `silent` 면 `error`, 모두 throw 하면 `warning` — 단, nullish 가 아닌 기본값(`createContext('en')`, `createContext(false)`, `createContext(defaults)`)으로 만든 컨텍스트는 `defaultedContexts` 레벨로 보고합니다(기본 `info`: 보이지만 절대 실패시키지 않음. 요청에 따라 `warning`, `error`, `ignore`).
@@ -269,7 +395,6 @@ process.exitCode = result.summary.errors > 0 ? 1 : 0;
 - 클로저 **어디에든** 도달 가능한 Provider 는 인정합니다. 소비자보다 아래에서 렌더되거나 조건부로만 렌더되어도 마찬가지입니다.
 - nullish 기본값을 구조 분해하면(`const { a } = useContext(C)`) `TypeError` 로 크래시하지만, 이는 가드가 아니라 사고이므로 `warning` 이 아닌 `error` 로 보고합니다.
 - `const P = C.Provider` 형태의 별칭만 인식합니다. `const { Provider } = C` 는 인식하지 않습니다.
-- `static contextType` / `this.context` 를 쓰는 클래스 컴포넌트는 소비자로 취급하지 않습니다.
 - 서드파티 모듈을 `export * from 'lib'` 로 재수출하는 barrel 을 통한 외부 컨텍스트는 추적하지 않습니다(이름을 지정한 재수출은 추적).
 
 ### 알려진 거짓 양성
@@ -282,7 +407,9 @@ process.exitCode = result.summary.errors > 0 ? 1 : 0;
 
 ### 알려진 거짓 음성
 
-- `static contextType`, `this.context`, `const { Provider } = C`, 커스텀 `createContext` 래퍼로 소비되는 컨텍스트.
+- `const { Provider } = C`, 커스텀 `createContext` 래퍼, 또는 `static contextType = C` / `Class.contextType = C` 이외의 방법(예: `Object.assign`)으로 `contextType` 을 지정한 클래스로 소비되는 컨텍스트.
+- `getLayout` 이외의 페이지별 레이아웃 방식(다른 이름의 static 프로퍼티)으로 마운트되는 Provider.
+- 아무것도 해석되지 않는 import 뒤의 모든 것(잘못된 `paths`, 프로젝트 레퍼런스, 빠진 `--tsconfig`) — `note unresolved imports` 로 보고되지만 그 뒤의 소비자와 Provider 는 보이지 않습니다.
 - `require()`, 문자열로 조립한 동적 import, 서드파티 모듈의 `export * from` barrel 로만 도달하는 Provider 나 소비자.
 - `import()` 근사: default export 가 없는 모듈에 대한 bare `import('./x')`, 또는 모듈 객체를 밖으로 흘리는 `.then` 콜백(`.then(m => helper(m))`)은 `x` 의 **모든 export** 를 추가하므로, 그 모듈의 무관한 export 에 있는 Provider 가 진짜 결과를 가릴 수 있습니다. 계산된 이름의 `.then(m => m[name])` 도 같은 방식으로 처리됩니다.
 - nullish 가 아닌 기본값으로 만든 컨텍스트는 기본이 `info` 라, `--fail-on error` 로는 그런 컨텍스트의 Provider 가 정말 빠져 있어도 CI 가 실패하지 않습니다. 코드베이스가 컨텍스트 기본값에 의존하지 않는다면 `--defaulted error` 를 쓰세요.
@@ -290,8 +417,8 @@ process.exitCode = result.summary.errors > 0 ? 1 : 0;
 
 ## 로드맵
 
-- App Router 의 `loading.*`, `error.*`, `not-found.*`, `default.*` 파일을 추가 엔트리로.
-- `static contextType` / `this.context` 소비자.
+- `--tsconfig` 를 요구하는 대신 tsconfig 프로젝트 레퍼런스를 자동으로 따라가기.
+- Windows CI.
 - 플래그 뒤에 숨긴 선택적 트리 순서 검사(소비자가 Provider 위에 렌더되는 경우).
 - watch 모드와 ESLint 포매터 호환 리포터.
 - 대형 모노레포를 위한 증분 분석.

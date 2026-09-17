@@ -121,6 +121,51 @@ describe('CLI (dist/cli.js)', () => {
     expect(JSON.parse(warn.stdout).summary).toMatchObject({ errors: 1, warnings: 2, infos: 0 });
   });
 
+  it('--env prints the environment and exits 0/2 like the analysis would', () => {
+    const ok = cli('--root', fixture('app-router-ok'), '--env');
+    expect(ok.code).toBe(0);
+    expect(ok.stdout).toMatch(/^unprovided \d+\.\d+\.\d+/);
+    expect(ok.stdout).toContain('typescript:  5.');
+    expect(ok.stdout).toContain('routers:     app router: app; pages router: none');
+    expect(ok.stdout).toContain('entries:     1 (app: 1, pages: 0, custom: 0)');
+    const mono = cli('--root', fixture('monorepo-root'), '--env');
+    expect(mono.code).toBe(2);
+    expect(mono.stdout).toContain('nested apps: apps/admin, apps/web');
+    expect(mono.stdout).toContain('error:       no entries found under');
+    const json = cli('--root', fixture('monorepo-root'), '--env', '--json', '--allow-empty');
+    expect(json.code).toBe(0);
+    expect(JSON.parse(json.stdout)).toMatchObject({
+      nestedApps: ['apps/admin', 'apps/web'],
+      error: null,
+    });
+  });
+
+  it('the no-entries error explains what was looked for and how to fix it', () => {
+    const mono = cli('--root', fixture('monorepo-root'));
+    expect(mono.code).toBe(2);
+    expect(mono.stderr).toContain('unprovided: no entries found under');
+    expect(mono.stderr).toContain('run once per app: unprovided --root apps/admin');
+    const withGlob = cli('--root', fixture('plain-react'), '--entry', 'nothing/**');
+    expect(withGlob.code).toBe(2);
+    expect(withGlob.stderr).toContain('--entry globs (nothing/** — matched no file)');
+  });
+
+  it('tsconfig problems: unknown options are notes (exit unchanged), an unparseable file exits 2', () => {
+    const notes = cli('--root', fixture('tsconfig-diagnostics'), '--tsconfig', 'tsconfig.app.json');
+    expect(notes.code).toBe(1);
+    expect(notes.stdout).toContain(
+      "note tsconfig: Unknown compiler option 'optionFromANewerTypeScript'. (TS5023, ignored",
+    );
+    const broken = cli(
+      '--root',
+      fixture('tsconfig-diagnostics'),
+      '--tsconfig',
+      'tsconfig.broken.json',
+    );
+    expect(broken.code).toBe(2);
+    expect(broken.stderr).toContain('unprovided: tsconfig: cannot parse');
+  });
+
   it('--help and --version exit 0', () => {
     const help = cli('--help');
     expect(help.code).toBe(0);

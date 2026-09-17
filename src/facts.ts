@@ -22,6 +22,11 @@ export interface UsageFact {
   kind: ConsumerKind;
   /** Consumers only: suppressed with `// unprovided-ignore-next-line`. */
   ignored: boolean;
+  /**
+   * Node used for reachability instead of `node` when the usage sits outside the declaration
+   * that makes it live (`C.contextType = Ctx` at module level → the class `C`).
+   */
+  anchor?: ts.Node;
 }
 
 export interface Facts {
@@ -521,6 +526,42 @@ export function extractFacts(
     });
   };
 
+  /**
+   * `static contextType` / `C.contextType = Ctx` reads the context with `this.context`, which
+   * has no throw guard, so it is always a silent consumer named after the class.
+   */
+  const recordClassConsumer = (
+    fact: ContextFact,
+    node: ts.Node,
+    sf: ts.SourceFile,
+    cls: ts.Node | undefined,
+  ): void => {
+    const owner =
+      cls ??
+      (ts.isBinaryExpression(node) && ts.isPropertyAccessExpression(node.left)
+        ? node.left.expression
+        : undefined);
+    let name = '<anonymous>';
+    let anchor: ts.Node | undefined;
+    if (owner && (ts.isClassDeclaration(owner) || ts.isClassExpression(owner)) && owner.name) {
+      name = owner.name.text;
+    } else if (owner && ts.isIdentifier(owner)) {
+      name = owner.text;
+      let sym = checker.getSymbolAtLocation(owner);
+      if (sym && sym.flags & ts.SymbolFlags.Alias) sym = checker.getAliasedSymbol(sym);
+      anchor = sym?.declarations?.[0];
+    }
+    consumers.push({
+      contextKey: fact.key,
+      node,
+      sf,
+      fnName: name,
+      kind: 'silent',
+      ignored: hasIgnoreComment(node, sf),
+      ...(anchor ? { anchor } : {}),
+    });
+  };
+
   const recordExternal = (role: ExternalRole, node: ts.Node, sf: ts.SourceFile): void => {
     const fact = contexts.get(role.ctxKey);
     if (!fact) return;
@@ -567,6 +608,24 @@ export function extractFacts(
           if (hit.role === 'provider') record(providers, hit.fact, n, sf, 'silent', false);
           else record(consumers, hit.fact, n, sf, 'silent', true);
         }
+      } else if (
+        ts.isPropertyDeclaration(n) &&
+        n.initializer &&
+        isContextTypeName(n.name) &&
+        n.modifiers?.some((m) => m.kind === ts.SyntaxKind.StaticKeyword)
+      ) {
+        // class C extends Component { static contextType = Ctx }
+        const fact = resolveContext(n.initializer);
+        if (fact) recordClassConsumer(fact, n, sf, n.parent);
+      } else if (
+        ts.isBinaryExpression(n) &&
+        n.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isPropertyAccessExpression(n.left) &&
+        isContextTypeName(n.left.name)
+      ) {
+        // C.contextType = Ctx
+        const fact = resolveContext(n.right);
+        if (fact) recordClassConsumer(fact, n, sf, undefined);
       }
 
       if (extModules.size > 0) {
@@ -593,6 +652,10 @@ export function extractFacts(
   }
 
   return { contexts, consumers, providers };
+}
+
+function isContextTypeName(name: ts.PropertyName | ts.MemberName): boolean {
+  return ts.isIdentifier(name) && name.text === 'contextType';
 }
 
 function isDeclarationName(id: ts.Identifier): boolean {
