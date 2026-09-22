@@ -435,14 +435,11 @@ pnpm test        # builds, then vitest (fixtures under test/fixtures, one e2e sp
 npm pack --dry-run
 ```
 
-Release: bump `version` in `package.json`, update `CHANGELOG.md`, commit, then
+Release: bump `version` in `package.json` and update `CHANGELOG.md` **in a PR. Merging that PR to `main` is the
+release**: the `Release` workflow sees the version change, creates the `vX.Y.Z` tag itself and publishes. It only does
+so when the merge was performed by the repository owner; a collaborator's merge of a version bump is logged and skipped.
 
-```sh
-git tag vX.Y.Z
-git push origin vX.Y.Z
-```
-
-The `Release` GitHub Action builds, tests and publishes to npm with provenance using npm **trusted publishing**: the workflow authenticates through its GitHub OIDC identity, so no npm token is stored anywhere. **Publish only through this tag → GitHub Actions flow; never run `npm publish` locally.** `publishConfig.registry` is pinned to `https://registry.npmjs.org/` so a machine whose `.npmrc` points at a private registry cannot publish there by accident. `v*` tags are protected by a repository ruleset: only the repository admin can create them, so a collaborator's write access cannot trigger a release.
+The `Release` GitHub Action builds, tests and publishes to npm with provenance using npm **trusted publishing**: the workflow authenticates through its GitHub OIDC identity, so no npm token is stored anywhere. **Publish only through this tag → GitHub Actions flow; never run `npm publish` locally.** `publishConfig.registry` is pinned to `https://registry.npmjs.org/` so a machine whose `.npmrc` points at a private registry cannot publish there by accident. `v*` tags are protected by a repository ruleset that only lets GitHub Actions create them, so neither a collaborator's write access nor a hand-pushed tag can trigger a release.
 
 ## License
 
